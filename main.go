@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	ffmpeg "github.com/u2takey/ffmpeg-go"
@@ -48,28 +47,33 @@ func processVideosInZip(zipFile, outputDir string, width, height int, speedFacto
 	defer reader.Close()
 
 	for _, file := range reader.File {
+		filePath := file.Name
+		if file.FileInfo().IsDir() {
+			if _, err = os.Stat(filePath); os.IsNotExist(err) {
+				err = os.MkdirAll(filePath, 0755)
+				if err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
+		input, err := file.Open()
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		if err = saveFile(input, file.Name); err != nil {
+			return err
+		}
+
 		if !file.FileInfo().IsDir() && strings.HasSuffix(strings.ToLower(file.Name), ".mp4") {
-			input, err := file.Open()
-			if err != nil {
-				return err
-			}
-			defer input.Close()
-			output := fmt.Sprintf("output_%s", file.FileInfo().Name())
-			inputFile := filepath.Join(outputDir, file.FileInfo().Name())
-			outputFile := filepath.Join(outputDir, output)
+			lastIndex := strings.LastIndex(filePath, "/")
+			fileDir := filePath[:lastIndex]
+			fileBaseName := strings.ReplaceAll(file.FileInfo().Name(), ".mp4", "")
 
-			err = saveFile(input, inputFile)
-			if err != nil {
-				return err
-			}
-
-			err = scaleAndSpeedUpVideo(inputFile, outputFile, width, height, speedFactor)
-			if err != nil {
-				return err
-			}
-
-			err = os.Remove(inputFile)
-			if err != nil {
+			output := fmt.Sprintf("%s/%s_%d_%d_%.2f.mp4", fileDir, fileBaseName, width, height, speedFactor)
+			if err = scaleAndSpeedUpVideo(file.Name, output, width, height, speedFactor); err != nil {
 				return err
 			}
 		}
@@ -81,7 +85,7 @@ func processVideosInZip(zipFile, outputDir string, width, height int, speedFacto
 func saveFile(reader io.Reader, outputFile string) error {
 	file, err := os.Create(outputFile)
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer file.Close()
 
